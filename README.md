@@ -62,7 +62,6 @@ local UNIT_ID = 1
 
 If the Gateway and the inverter are in the same local network, use the local IP address of the SMA inverter. A public router address should only be used when a VPN or a correctly configured port forwarding solution is available.
 
-The SMA web interface password is not used by this Lua integration. SunSpec Modbus TCP is a separate communication interface.
 
 The tested inverter responded with:
 
