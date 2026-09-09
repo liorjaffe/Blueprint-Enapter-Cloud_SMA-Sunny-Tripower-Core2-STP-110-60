@@ -133,7 +133,7 @@ The value shown as `Real-time Active Power` in the Enapter application is based 
 For example:
 
 ```text
-Real-time Active Power: 39.33 kW
+Real-time Active Power: 25.33 kW
 ```
 
 The field `ac_total_power_kw` is calculated only by converting watts to kilowatts:
@@ -161,7 +161,7 @@ ac_energy_total_kwh
 The Enapter application can therefore display a value such as:
 
 ```text
-Total Yield: 124914.5 kWh
+Total Yield: 12491.5 kWh
 ```
 
 This is the cumulative energy value reported by the inverter.
