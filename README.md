@@ -1,41 +1,56 @@
 # SMA Sunny Tripower CORE2 STP110-60
 
-Enapter Blueprint für die lesende Überwachung eines SMA Sunny Tripower CORE2 STP110-60 über SunSpec Modbus TCP.
+Enapter Blueprint for read-only monitoring of an SMA Sunny Tripower CORE2 STP110-60 via SunSpec Modbus TCP.
 
 ## Status
 
-Der Blueprint wurde am 9. September 2026 erfolgreich auf einem Enapter Virtual UCM getestet. Das Gerät wurde erkannt und liefert fortlaufend Telemetriedaten. Der erfolgreiche Verbindungstest meldete:
+The blueprint was successfully tested on an Enapter Virtual UCM on September 9, 2026. The inverter was detected and continuously provided live telemetry data. The successful connection log reported:
 
 ```text
 SunSpec connection ready, holdings at register 40000 with Unit ID 1
 ```
 
-Die anschließenden Telemetriedaten enthielten unter anderem den Status `running`, AC-Leistung, DC-Leistung, Spannungen, Ströme, Frequenz, Energie und Wechselrichtertemperatur. [1]
+The following telemetry was received continuously:
 
-## Dateien
+- Device status
+- Real-time AC active power
+- Reactive power
+- Apparent power
+- Power factor
+- AC voltages
+- AC currents
+- DC voltage
+- DC current
+- DC power
+- Cumulative energy yield
+- Inverter temperature
 
-Der Blueprint besteht aus zwei Dateien:
+## Files
+
+The blueprint consists of two main files:
 
 ```text
 manifest.yml
 main.lua
 ```
 
-`manifest.yml` beschreibt die Eigenschaften, Telemetrie und Alarme. `main.lua` implementiert die SunSpec-Modbus-TCP-Kommunikation.
+`manifest.yml` defines the device metadata, properties, telemetry fields, and alerts.
 
-## Voraussetzungen
+`main.lua` implements the SunSpec Modbus TCP communication and data parsing.
 
-- Ein Enapter Gateway mit einem Virtual UCM.
-- Ein für Ethernet und Modbus TCP erreichbarer SMA-Wechselrichter.
-- TCP-Port 502 zwischen Gateway und Wechselrichter.
-- SunSpec beziehungsweise Modbus TCP am SMA aktiviert.
-- Die aktuelle `main.lua` aus diesem Projekt.
+## Requirements
 
-Ein Virtual UCM läuft als Software auf dem Enapter Gateway und ist für Ethernet- und Modbus-TCP-Geräte vorgesehen. [2]
+- An Enapter Gateway with a Virtual UCM.
+- An SMA Sunny Tripower CORE2 reachable via Ethernet.
+- TCP port 502 reachable between the Enapter Gateway and the inverter.
+- SunSpec Modbus TCP enabled on the SMA inverter.
+- The current `main.lua` file from this project.
 
-## Verbindung konfigurieren
+An Enapter Virtual UCM runs as software on the Enapter Gateway and is designed for Ethernet and Modbus TCP devices.
 
-Die Verbindung wird in `main.lua` eingestellt:
+## Connection configuration
+
+The connection is configured in `main.lua`:
 
 ```lua
 local DEVICE_HOST = "192.168.1.123"
@@ -43,21 +58,25 @@ local DEVICE_PORT = 502
 local UNIT_ID = 1
 ```
 
-`DEVICE_HOST` muss die IP-Adresse sein, die vom Enapter Gateway aus erreichbar ist. Wenn Gateway und Wechselrichter im selben lokalen Netzwerk stehen, sollte normalerweise die lokale IP-Adresse des Wechselrichters verwendet werden. Eine Webanmeldung am SMA ist für SunSpec Modbus TCP nicht Bestandteil dieses Lua-Codes.
+`DEVICE_HOST` must be the IP address that is reachable from the Enapter Gateway.
 
-Der aktuell getestete Wechselrichter antwortete mit:
+If the Gateway and the inverter are in the same local network, use the local IP address of the SMA inverter. A public router address should only be used when a VPN or a correctly configured port forwarding solution is available.
+
+The SMA web interface password is not used by this Lua integration. SunSpec Modbus TCP is a separate communication interface.
+
+The tested inverter responded with:
 
 ```text
-Registertyp: holdings
-Startadresse: 40000
+Register type: holdings
+Start address: 40000
 Unit ID: 1
 ```
 
-Die Software probiert zusätzlich weitere Kombinationen, falls sich die Registerabbildung einer Installation unterscheidet.
+The software also probes additional combinations in case the register mapping differs between installations.
 
 ## Manifest
 
-Das Projekt verwendet absichtlich die ältere, vom Zielsystem akzeptierte Blueprint-Spezifikation:
+The project intentionally uses the older Blueprint specification accepted by the target system:
 
 ```yaml
 blueprint_spec: device/1.0
@@ -67,67 +86,160 @@ communication_module:
   lua_file: main.lua
 ```
 
-`runtime`, `requirements`, `options` und die neue `configuration`-Struktur werden in diesem Projekt nicht verwendet, weil der eingesetzte Validator nur `device/1.0` akzeptiert.
+The `runtime`, `requirements`, `options`, and newer `configuration` sections are not used in this project because the target validator accepts `device/1.0`.
 
-## Automatische Erkennung
+## Automatic connection discovery
 
-Beim Start führt `main.lua` folgende Schritte aus:
+When the script starts, `main.lua` performs the following steps:
 
-1. Die Lua-Modbus-API wird aus der aktuellen Enapter-Runtime geladen. Als Rückfall wird zusätzlich ein Modulimport versucht.
-2. Der SunSpec-Header wird mit einer kurzen Zwei-Register-Abfrage gesucht.
-3. Geprüft werden Holding- und Input-Register.
-4. Geprüft werden die Startadressen `0`, `40000` und `40001`.
-5. Geprüft werden die Unit-IDs `1`, `3`, `2` und `4`.
-6. Nach erfolgreicher Erkennung wird die gefundene Kombination für die weiteren Lesevorgänge verwendet.
-7. Die SunSpec-Modellkette wird durchsucht und Modell 103 wird ausgelesen.
+1. It loads the Modbus API provided by the Enapter runtime.
+2. It supports both the current direct API and older module-based loading.
+3. It probes the two-register SunSpec header.
+4. It tests holding registers and input registers.
+5. It tests register start addresses `0`, `40000`, and `40001`.
+6. It tests Unit IDs `1`, `3`, `2`, and `4`.
+7. After finding a valid SunSpec header, it keeps the successful combination for all following reads.
+8. It scans the SunSpec model chain.
+9. It parses SunSpec inverter model 103.
 
-Die Modbus-API stellt Leseoperationen für Holding- und Input-Register bereit. SunSpec-Modell 103 ist das dreiphasige Wechselrichtermodell. [3] [4]
+The tested device was detected using holding registers starting at address `40000` with Unit ID `1`.
 
-## Erfasste Telemetrie
+## Main measured values
 
-| Feld | Bedeutung |
+The following fields are measured values read from SunSpec model 103:
+
+| Field | Meaning |
 |---|---|
-| `status` | Normalisierter Betriebsstatus, zum Beispiel `running`, `starting`, `idle` oder `error` |
-| `sun_spec_model` | Erkannte SunSpec-Modellnummer, im getesteten Gerät `103` |
-| `ac_l1_voltage` | Spannung L1 gegen N, sofern vom Gerät geliefert |
-| `ac_l2_voltage` | Spannung L2 gegen N, sofern vom Gerät geliefert |
-| `ac_l3_voltage` | Spannung L3 gegen N, sofern vom Gerät geliefert |
-| `ac_l1_current` | Strom L1 |
-| `ac_l2_current` | Strom L2 |
-| `ac_l3_current` | Strom L3 |
-| `ac_total_power` | Gemessene gesamte AC-Wirkleistung in W |
-| `ac_total_power_kw` | Derselbe gemessene Gesamtwert in kW für eine verständlichere App-Anzeige |
-| `ac_l1_power` | Geschätzte Leistung L1, Gesamtleistung geteilt durch 3 |
-| `ac_l2_power` | Geschätzte Leistung L2, Gesamtleistung geteilt durch 3 |
-| `ac_l3_power` | Geschätzte Leistung L3, Gesamtleistung geteilt durch 3 |
-| `ac_frequency` | Netzfrequenz |
-| `ac_power_apparent` | Scheinleistung |
-| `ac_power_reactive` | Blindleistung |
-| `ac_power_factor` | Leistungsfaktor |
-| `ac_energy_total` | Kumulierte AC-Energie aus dem SunSpec-Feld `WH` in Wh |
-| `ac_energy_total_kwh` | Derselbe kumulierte Energiezähler in kWh, entsprechend der SMA-Anzeige Total Yield |
-| `dc_voltage` | DC-Spannung |
-| `dc_current` | DC-Strom |
-| `dc_power` | DC-Leistung |
-| `inverter_temperature` | Bevorzugt Kühlkörpertemperatur, ansonsten Gehäusetemperatur |
+| `ac_total_power` | Measured total AC active power in watts |
+| `ac_total_power_kw` | The same measured total AC active power converted to kilowatts |
+| `ac_power_apparent` | Total apparent power |
+| `ac_power_reactive` | Total reactive power |
+| `ac_power_factor` | Total power factor |
+| `ac_frequency` | Grid frequency |
+| `ac_l1_voltage` | AC voltage from L1 to neutral |
+| `ac_l2_voltage` | AC voltage from L2 to neutral |
+| `ac_l3_voltage` | AC voltage from L3 to neutral |
+| `ac_l1_current` | AC current on L1 |
+| `ac_l2_current` | AC current on L2 |
+| `ac_l3_current` | AC current on L3 |
+| `dc_voltage` | DC voltage |
+| `dc_current` | DC current |
+| `dc_power` | DC power |
+| `inverter_temperature` | Heat sink temperature, or cabinet temperature as fallback |
+| `status` | Normalized inverter operating status |
+| `sun_spec_model` | Detected SunSpec model number |
 
-## Wichtige Einschränkung bei den Phasenleistungen
+The value shown as `Real-time Active Power` in the Enapter application is based on the measured SunSpec total active power field `W`.
 
-SunSpec-Modell 103 stellt die gesamte AC-Wirkleistung `W` bereit, aber keine unabhängigen Wirkleistungen für L1, L2 und L3. Deshalb werden die drei Phasenwerte wie folgt berechnet:
+For example:
 
 ```text
-ac_l1_power = ac_total_power / 3
-ac_l2_power = ac_total_power / 3
-ac_l3_power = ac_total_power / 3
+Real-time Active Power: 39.33 kW
 ```
 
-Der verbindliche Messwert ist `ac_total_power` beziehungsweise `ac_total_power_kw`. Die Phasenwerte sind nur Schätzwerte und dürfen nicht zur Unsymmetrieanalyse verwendet werden. [4]
+The field `ac_total_power_kw` is calculated only by converting watts to kilowatts:
 
-## Statusabbildung
+```lua
+ac_total_power_kw = ac_total_power / 1000
+```
 
-Die SunSpec-Betriebszustände werden wie folgt auf den Blueprint-Status abgebildet:
+No phase balancing assumption is used for this value.
 
-| SunSpec `St` | Blueprint-Status |
+## Energy yield
+
+The blueprint provides the cumulative energy counter from SunSpec field `WH`:
+
+```text
+ac_energy_total
+```
+
+The same value is also provided in kilowatt-hours:
+
+```text
+ac_energy_total_kwh
+```
+
+The Enapter application can therefore display a value such as:
+
+```text
+Total Yield: 124914.5 kWh
+```
+
+This is the cumulative energy value reported by the inverter.
+
+A separate daily yield value is not currently read from SunSpec model 103. A daily value would require either:
+
+- A dedicated SMA register.
+- An extended SunSpec model.
+- A persistent midnight baseline calculation.
+
+## Estimated phase active power
+
+SunSpec model 103 provides:
+
+- Total AC active power.
+- Phase currents.
+- Phase voltages.
+
+It does not provide independent measured active power values for L1, L2, and L3.
+
+For this reason, the following fields are estimates:
+
+```text
+Estimated AC Active Power L1
+Estimated AC Active Power L2
+Estimated AC Active Power L3
+```
+
+They are calculated as:
+
+```text
+Estimated AC Active Power L1 = Total AC Active Power / 3
+Estimated AC Active Power L2 = Total AC Active Power / 3
+Estimated AC Active Power L3 = Total AC Active Power / 3
+```
+
+For example, if the measured total active power is `36.9 kW`, the application shows approximately:
+
+```text
+L1: 12.3 kW
+L2: 12.3 kW
+L3: 12.3 kW
+```
+
+These values are not independent phase measurements. They must not be used for phase imbalance analysis.
+
+The authoritative value for the inverter output is:
+
+```text
+ac_total_power
+```
+
+or:
+
+```text
+ac_total_power_kw
+```
+
+Do not compare only L1 plus L2 with total active power. A three-phase total includes L1, L2, and L3.
+
+## Why voltage and current do not provide exact phase active power
+
+The approximate phase apparent power can be calculated from voltage and current:
+
+```text
+Phase apparent power = Phase voltage × Phase current
+```
+
+However, exact active power also requires the individual phase power factor and phase angle.
+
+Because SunSpec model 103 does not provide separate phase power factors, the exact active power of each phase cannot be calculated reliably from the available data.
+
+## Status mapping
+
+SunSpec operating states are mapped to the Blueprint status field as follows:
+
+| SunSpec `St` | Blueprint status |
 |---:|---|
 | 1, 2, 6, 8 | `idle` |
 | 3 | `starting` |
@@ -135,56 +247,163 @@ Die SunSpec-Betriebszustände werden wie folgt auf den Blueprint-Status abgebild
 | 5 | `throttled` |
 | 7 | `error` |
 
-## Alarme
+The status `running` indicates that the inverter is operating normally according to its SunSpec operating state.
 
-Der Blueprint definiert folgende Alarme:
+## Alerts
 
-- `communication_failed`: Die Modbus-Kommunikation oder das Auslesen ist fehlgeschlagen.
-- `unsupported_device`: Es wurde kein SunSpec-Modell 103 gefunden.
-- `not_configured`: Für ältere Installationen beziehungsweise historische Zustände, falls die Verbindung nicht konfiguriert wurde.
+The Blueprint defines the following alerts:
 
-## Verhalten bei Kommunikationsfehlern
+- `communication_failed`: Modbus communication or telemetry reading failed.
+- `unsupported_device`: No supported SunSpec three-phase inverter model 103 was found.
+- `not_configured`: The connection has not been configured.
 
-Der Code verhindert, dass ein fehlendes SunSpec-Layout weitere Lua-Fehler verursacht. Wenn die Verbindung oder die Modell-Erkennung fehlschlägt:
+The `alerts` array is empty when no alert is active.
 
-- wird der Fehler protokolliert,
-- wird der Client zurückgesetzt,
-- wird ein Kommunikationsalarm gesendet,
-- wird bei der nächsten Ausführung erneut verbunden.
+## Telemetry intervals
 
-Fehlercodes ohne numerischen Wert werden sicher behandelt und nicht an `err_to_str` weitergereicht.
+The Blueprint sends:
 
-## Upload-Checkliste
+- Telemetry approximately every 5 seconds.
+- Device properties approximately every 30 seconds.
 
-1. `DEVICE_HOST` in `main.lua` auf die erreichbare SMA-IP setzen.
-2. Prüfen, dass TCP-Port 502 erreichbar und Modbus TCP am SMA aktiviert ist.
-3. `manifest.yml` und `main.lua` im selben Blueprint-Verzeichnis ablegen.
-4. Den Blueprint dem Virtual UCM des Enapter Gateways zuweisen.
-5. Den Blueprint hochladen.
-6. Im Log nach `SunSpec connection ready` suchen.
-7. Danach prüfen, ob Telemetrie mit `status: "running"` oder dem tatsächlichen Betriebsstatus eintrifft.
+The frequent telemetry log entries are therefore expected during normal operation.
 
-## Sicherheit und Umfang
+## Error handling
 
-Der Blueprint ist read-only. Er schreibt keine Register und führt keine Steuerbefehle am Wechselrichter aus. Das SMA-Webpasswort wird nicht im Blueprint gespeichert und nicht an die Modbus-Verbindung übertragen.
+The script handles the following conditions:
 
-Die Tagesenergie wird nicht separat berechnet. Ausgelesen wird die kumulierte AC-Energie aus dem SunSpec-Feld `WH`.
+- Missing Modbus APIs.
+- Failed Modbus reads.
+- Missing or invalid SunSpec headers.
+- Unsupported SunSpec model chains.
+- Missing numeric error codes.
+- Missing SunSpec layout information.
+- Temporary communication failures.
 
-## Referenzen
+When communication fails, the script:
 
-[1] Validierungslog des Projekts, 9. September 2026, erfolgreiche SunSpec-Erkennung und laufende Telemetrie.
+1. Logs the error.
+2. Resets the Modbus client.
+3. Clears the detected layout.
+4. Sends a communication alert.
+5. Attempts to reconnect during the next scheduled cycle.
 
-[2] Enapter Handbook, *Universal Communication Modules*, Abschnitt `ENP-VIRTUAL`, https://dev-handbook.enapter.com/modules/modules.html
+## Expected successful log output
 
-[3] Enapter Developer Toolkit, *Modbus TCP*, https://developers.enapter.com/docs/reference/vucm/modbustcp
+A successful connection should produce a log entry similar to:
 
-[4] SunSpec Models Repository, *Model 103, Inverter Three Phase*, https://raw.githubusercontent.com/sunspec/models/master/json/model_103.json
+```text
+SunSpec connection ready, holdings at register 40000 with Unit ID 1
+```
 
+The following telemetry confirms that the inverter is being read:
 
+```text
+status: running
+sun_spec_model: 103
+ac_total_power_kw: ...
+ac_energy_total_kwh: ...
+```
 
+## Troubleshooting
 
+### The Modbus API is not available
 
+If the log reports:
 
+```text
+Neither modbus nor modbustcp is available
+```
 
+check that:
 
+- The Blueprint is assigned to a Virtual UCM.
+- The Virtual UCM is running on the intended Gateway.
+- The Gateway software is operational.
+- The latest `main.lua` is being uploaded.
 
+### The SunSpec header cannot be found
+
+If the log reports:
+
+```text
+SunSpec header not found. Probe results: ...
+```
+
+check:
+
+- The inverter IP address.
+- TCP port 502.
+- The network route between the Gateway and the inverter.
+- Whether Modbus TCP is enabled on the SMA.
+- The Unit ID.
+- Whether the Gateway can reach the inverter directly.
+
+### The device uploads successfully but no telemetry appears
+
+A successful upload only confirms that the Blueprint was transferred successfully. It does not confirm that the inverter responded to Modbus requests.
+
+Check the runtime logs for:
+
+```text
+SunSpec connection ready
+```
+
+### The power value differs from the SMA web interface
+
+Compare the following values:
+
+```text
+Enapter: Real-time Active Power
+SMA: Real-time Active Power
+```
+
+Do not compare the sum of only two estimated phase values with the total inverter power.
+
+Also ensure that both interfaces are being viewed at approximately the same time. The SMA web interface and Enapter may refresh their values at different intervals.
+
+## Upload checklist
+
+1. Set `DEVICE_HOST` in `main.lua` to the reachable SMA IP address.
+2. Keep TCP port `502` unless the SMA configuration uses another port.
+3. Keep Unit ID `1` unless the installation uses a different Unit ID.
+4. Place `manifest.yml` and `main.lua` in the same Blueprint directory.
+5. Assign the Blueprint to the Virtual UCM on the Enapter Gateway.
+6. Upload the Blueprint.
+7. Search the logs for `SunSpec connection ready`.
+8. Confirm that telemetry arrives with the actual inverter status.
+9. Compare SMA `Real-time Active Power` with Enapter `Real-time Active Power`.
+
+## Safety and scope
+
+This Blueprint is read-only.
+
+It does not:
+
+- Write Modbus registers.
+- Change inverter settings.
+- Change active power limits.
+- Control the inverter.
+- Store or transmit the SMA web interface password.
+
+The Blueprint only reads SunSpec Modbus TCP measurements and sends them to Enapter.
+
+## References
+
+[1] Enapter Developer Toolkit, Modbus TCP API:  
+https://developers.enapter.com/docs/reference/vucm/modbustcp
+
+[2] Enapter Handbook, Universal Communication Modules, ENP-VIRTUAL:  
+https://dev-handbook.enapter.com/modules/modules.html
+
+[3] Enapter Handbook, Virtual UCM:  
+https://handbook.enapter.com/software/virtual_ucm/
+
+[4] SunSpec Models Repository, Model 103, Inverter Three Phase:  
+https://raw.githubusercontent.com/sunspec/models/master/json/model_103.json
+
+[5] SMA, Sunny Tripower CORE2 technical information:  
+https://files.sma.de/downloads/STP60_SHP75_STPS60-SunSpec_Modbus-TI-en-15.pdf
+
+[6] SMA, Sunny Tripower CORE2 product and Modbus SunSpec information:  
+https://www.sma.de/en/products/solarinverters/sunny-tripower-core2
