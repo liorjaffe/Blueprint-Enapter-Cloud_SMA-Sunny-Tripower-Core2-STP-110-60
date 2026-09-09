@@ -161,7 +161,7 @@ ac_energy_total_kwh
 The Enapter application can therefore display a value such as:
 
 ```text
-Total Yield: 12491.5 kWh
+Total Yield: 945491.5 kWh
 ```
 
 This is the cumulative energy value reported by the inverter.
