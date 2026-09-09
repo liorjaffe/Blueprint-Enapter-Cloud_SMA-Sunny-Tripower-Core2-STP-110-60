@@ -1,0 +1,142 @@
+blueprint_spec: device/1.0
+
+display_name: SMA Sunny Tripower CORE2 STP110-60
+description: >-
+  Read-only integration for the SMA Sunny Tripower CORE2 STP110-60 over
+  SunSpec Modbus TCP. Configure the inverter IP address in main.lua.
+icon: enapter-solar-panel
+vendor: sma
+license: MIT
+author: liorjaffe
+
+communication_module:
+  product: ENP-VIRTUAL
+  lua_file: main.lua
+
+properties:
+  inverter_nameplate_capacity:
+    display_name: Inverter Rated Power
+    type: integer
+
+telemetry:
+  status:
+    display_name: Device Status
+    type: string
+    enum:
+      - error
+      - starting
+      - running
+      - throttled
+      - idle
+
+  sun_spec_model:
+    display_name: SunSpec Inverter Model
+    type: integer
+
+  ac_total_power_kw:
+    display_name: Real-time Active Power
+    description: Measured total AC active power from SunSpec W, displayed in kW.
+    type: float
+    unit: kW
+  ac_total_power:
+    display_name: Real-time Active Power (W)
+    description: Measured total AC active power from SunSpec model 103.
+    type: float
+    unit: W
+  ac_power_apparent:
+    display_name: Total Apparent Power
+    type: float
+    unit: VA
+  ac_power_reactive:
+    display_name: Total Reactive Power
+    type: float
+    unit: var
+  ac_power_factor:
+    display_name: Total Power Factor
+    type: float
+  ac_frequency:
+    display_name: Grid Frequency
+    type: float
+    unit: Hz
+
+  ac_energy_total_kwh:
+    display_name: Total Yield
+    description: Cumulative AC energy from SunSpec WH, displayed in kWh.
+    type: float
+    unit: kWh
+  ac_energy_total:
+    display_name: Total Yield (Wh)
+    type: float
+    unit: Wh
+
+  ac_l1_voltage:
+    display_name: AC Voltage L1-N
+    type: float
+    unit: V
+  ac_l2_voltage:
+    display_name: AC Voltage L2-N
+    type: float
+    unit: V
+  ac_l3_voltage:
+    display_name: AC Voltage L3-N
+    type: float
+    unit: V
+  ac_l1_current:
+    display_name: AC Current L1
+    type: float
+    unit: A
+  ac_l2_current:
+    display_name: AC Current L2
+    type: float
+    unit: A
+  ac_l3_current:
+    display_name: AC Current L3
+    type: float
+    unit: A
+
+  ac_l1_power:
+    display_name: Estimated AC Active Power L1
+    description: Estimated as one third of measured total AC active power. Not an independent phase measurement.
+    type: float
+    unit: W
+  ac_l2_power:
+    display_name: Estimated AC Active Power L2
+    description: Estimated as one third of measured total AC active power. Not an independent phase measurement.
+    type: float
+    unit: W
+  ac_l3_power:
+    display_name: Estimated AC Active Power L3
+    description: Estimated as one third of measured total AC active power. Not an independent phase measurement.
+    type: float
+    unit: W
+
+  dc_voltage:
+    display_name: DC Voltage
+    type: float
+    unit: V
+  dc_current:
+    display_name: DC Current
+    type: float
+    unit: A
+  dc_power:
+    display_name: DC Power
+    type: float
+    unit: W
+  inverter_temperature:
+    display_name: Inverter Temperature
+    type: float
+    unit: Cel
+
+alerts:
+  not_configured:
+    severity: warning
+    display_name: Modbus Connection Not Configured
+    description: Set DEVICE_HOST in main.lua to the inverter IP address.
+  communication_failed:
+    severity: error
+    display_name: Modbus Communication Failed
+    description: The inverter could not be read over Modbus TCP.
+  unsupported_device:
+    severity: error
+    display_name: Unsupported SunSpec Device
+    description: No SunSpec three-phase inverter model 103 was found.
