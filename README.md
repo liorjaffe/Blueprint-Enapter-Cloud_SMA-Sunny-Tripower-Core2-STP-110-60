@@ -4,7 +4,7 @@ Enapter Blueprint for read-only monitoring of an SMA Sunny Tripower CORE2 STP110
 
 ## Status
 
-The blueprint was successfully tested on an Enapter Virtual UCM on September 9, 2026. The inverter was detected and continuously provided live telemetry data. The successful connection log reported:
+The blueprint was successfully tested on an Enapter Virtual UCM. The inverter was detected and continuously provided live telemetry data. The successful connection log reported:
 
 ```text
 SunSpec connection ready, holdings at register 40000 with Unit ID 1
