@@ -201,9 +201,9 @@ Estimated AC Active Power L3 = Total AC Active Power / 3
 For example, if the measured total active power is `36.9 kW`, the application shows approximately:
 
 ```text
-L1: 12.3 kW
-L2: 12.3 kW
-L3: 12.3 kW
+L1: 8.4 kW
+L2: 8.4 kW
+L3: 8.4 kW
 ```
 
 These values are not independent phase measurements. They must not be used for phase imbalance analysis.
