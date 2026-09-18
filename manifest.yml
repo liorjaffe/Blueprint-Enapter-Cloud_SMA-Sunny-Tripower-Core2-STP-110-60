@@ -140,3 +140,20 @@ alerts:
     severity: error
     display_name: Unsupported SunSpec Device
     description: No SunSpec three-phase inverter model 103 was found.
+
+command_groups:
+  connection:
+    display_name: Connection
+
+commands:
+  reconnect:
+    display_name: Reconnect
+    description: >-
+      Drops the current Modbus TCP connection and immediately reconnects
+      and rediscovers the inverter's SunSpec registers. Use this instead
+      of rebooting the device from Enapter Cloud when telemetry stops
+      updating.
+    group: connection
+    ui:
+      icon: refresh
+      quick_access: true
