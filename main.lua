@@ -2,14 +2,27 @@
 -- Read-only SunSpec Modbus TCP integration for an Enapter Virtual UCM.
 -- Change DEVICE_HOST before uploading the blueprint.
 
-local DEVICE_HOST = "xxx.xxx.xxx.xx"
+local DEVICE_HOST = "xxx.xxx.xxx.xxx"
 local DEVICE_PORT = 502
 local UNIT_ID = 1
 
 local READ_START_FALLBACK = 0
 local READ_COUNT = 125
 local TIMEOUT_MS = 1000
+local DISCOVERY_TIMEOUT_MS = 300 -- shorter timeout used only while probing for
+                                  -- the register layout, so a full 24-combo
+                                  -- scan can never exceed the scheduler's
+                                  -- 10 second per-call execution limit.
 local RATED_POWER_W = 110000
+
+-- Reconnect attempts back off exponentially instead of retrying every
+-- second. Retrying too fast while the inverter is unreachable was leaving
+-- unclosed Modbus TCP sockets piling up (the modbustcp API has no close()
+-- call, only garbage collection), which is very likely what has been
+-- exhausting the SMA's small limit of concurrent Modbus TCP connections
+-- and requiring a full device reboot to clear.
+local RECONNECT_BACKOFF_INITIAL_S = 2
+local RECONNECT_BACKOFF_MAX_S = 30
 
 local function load_api(name)
   -- Current Enapter runtimes expose protocol APIs as globals. Older runtimes
@@ -35,6 +48,14 @@ local layout = nil
 local active_unit_id = UNIT_ID
 local last_error = nil
 
+-- Remembers the register kind/start/unit ID that worked last time, so a
+-- reconnect after a brief network blip only needs to re-check that single
+-- combination instead of scanning every possibility again.
+local last_known_layout = nil
+
+local reconnect_backoff_s = RECONNECT_BACKOFF_INITIAL_S
+local next_reconnect_at_s = 0
+
 local function error_text(value)
   if value == nil then
     return "no error code returned"
@@ -53,25 +74,23 @@ end
 
 local function create_client()
   local uri = "tcp://" .. DEVICE_HOST .. ":" .. tostring(DEVICE_PORT)
-  local new_client
-  local err
 
   if ok_modbus and modbus and modbus.new then
-    new_client, err = modbus.new(uri)
-    if new_client then
+    local ok, new_client, err = pcall(modbus.new, uri)
+    if ok and new_client then
       backend = "modbus"
       return new_client
     end
-    last_error = "modbus.new failed: " .. tostring(err)
+    last_error = "modbus.new failed: " .. tostring(ok and err or new_client)
   end
 
   if ok_modbustcp and modbustcp and modbustcp.new then
-    new_client = modbustcp.new(DEVICE_HOST .. ":" .. tostring(DEVICE_PORT))
-    if new_client then
+    local ok, new_client = pcall(modbustcp.new, DEVICE_HOST .. ":" .. tostring(DEVICE_PORT))
+    if ok and new_client then
       backend = "modbustcp"
       return new_client
     end
-    last_error = "modbustcp.new failed"
+    last_error = "modbustcp.new failed: " .. tostring(ok and "no client returned" or new_client)
   end
 
   if not ok_modbus and not ok_modbustcp then
@@ -82,18 +101,32 @@ local function create_client()
   return nil
 end
 
-local function read_registers(kind, start_register, count, unit_id)
+local function read_registers(kind, start_register, count, unit_id, timeout_ms)
   if not client then
     return nil, "no client"
   end
 
-  local values
-  local result
+  local resolved_timeout = timeout_ms or TIMEOUT_MS
+  local resolved_unit_id = unit_id or active_unit_id
 
+  -- pcall protects against the Modbus binding raising a Lua error (e.g. on
+  -- a broken/reset socket) instead of returning an error value. Without
+  -- this, such an error would propagate out of reconnect()/send_telemetry()
+  -- uncaught and could permanently stop the scheduled jobs from running
+  -- again until the device was rebooted.
+  local ok, values, result
   if kind == "inputs" then
-    values, result = client:read_inputs(unit_id or active_unit_id, start_register, count, TIMEOUT_MS)
+    ok, values, result = pcall(function()
+      return client:read_inputs(resolved_unit_id, start_register, count, resolved_timeout)
+    end)
   else
-    values, result = client:read_holdings(unit_id or active_unit_id, start_register, count, TIMEOUT_MS)
+    ok, values, result = pcall(function()
+      return client:read_holdings(resolved_unit_id, start_register, count, resolved_timeout)
+    end)
+  end
+
+  if not ok then
+    return nil, "exception: " .. tostring(values)
   end
 
   if not values then
@@ -120,7 +153,25 @@ local function is_sunspec_header(data)
   return data[1] == 0x5375 and data[2] == 0x6E53
 end
 
+local function probe_combo(kind, start, unit_id)
+  local header, err = read_registers(kind, start, 2, unit_id, DISCOVERY_TIMEOUT_MS)
+  if header and is_sunspec_header(header) then
+    return { kind = kind, start = start, unit_id = unit_id }
+  end
+  return nil, err
+end
+
 local function discover_layout()
+  -- Fast path: retry the combination that worked last time first. This
+  -- keeps a routine reconnect to a single request and comfortably within
+  -- the scheduler's 10 second per-call execution limit.
+  if last_known_layout then
+    local found = probe_combo(last_known_layout.kind, last_known_layout.start, last_known_layout.unit_id)
+    if found then
+      return found, nil
+    end
+  end
+
   -- SMA installations differ in register type, register base and Unit ID.
   -- Probe only the two-register SunSpec header, then retain the successful
   -- combination for all following reads.
@@ -137,10 +188,9 @@ local function discover_layout()
 
   for _, unit_id in ipairs(unit_ids) do
     for _, probe in ipairs(probes) do
-      local header, err = read_registers(probe.kind, probe.start, 2, unit_id)
-      if header and is_sunspec_header(header) then
-        probe.unit_id = unit_id
-        return probe, nil
+      local found, err = probe_combo(probe.kind, probe.start, unit_id)
+      if found then
+        return found, nil
       end
       errors[#errors + 1] = probe.kind .. ":" .. tostring(probe.start)
         .. "/unit:" .. tostring(unit_id) .. "=" .. error_text(err)
@@ -150,11 +200,7 @@ local function discover_layout()
   return nil, table.concat(errors, ", ")
 end
 
-local function reconnect()
-  if client then
-    return true
-  end
-
+local function attempt_reconnect()
   if not ok_modbus and not ok_modbustcp then
     if last_error ~= "Neither modbus nor modbustcp is available" then
       last_error = "Neither modbus nor modbustcp is available"
@@ -183,6 +229,7 @@ local function reconnect()
   end
 
   active_unit_id = layout.unit_id
+  last_known_layout = { kind = layout.kind, start = layout.start, unit_id = layout.unit_id }
   last_error = nil
   enapter.log(
     "SunSpec connection ready, " .. layout.kind .. " at register " .. tostring(layout.start)
@@ -190,6 +237,90 @@ local function reconnect()
     "info"
   )
   return true
+end
+
+-- force = true bypasses the backoff timer and forces a fresh connection
+-- even if `client` currently looks alive. Used by the manual "Reconnect"
+-- command below.
+local function reconnect(force)
+  if client and not force then
+    return true
+  end
+
+  local now = system.uptime()
+  if not force and now < next_reconnect_at_s then
+    return false
+  end
+
+  if force and client then
+    client = nil
+    backend = nil
+    layout = nil
+  end
+
+  -- pcall here is the final safety net: even if something inside
+  -- attempt_reconnect() raises an unexpected Lua error, it is caught here
+  -- and treated as a failed attempt (with backoff) instead of killing the
+  -- scheduled job that called reconnect().
+  local ok, result = pcall(attempt_reconnect)
+  local success = ok and result
+
+  if not ok then
+    last_error = "reconnect() raised an error: " .. tostring(result)
+    enapter.log(last_error, "error", true)
+    client = nil
+    backend = nil
+    layout = nil
+  end
+
+  if success then
+    reconnect_backoff_s = RECONNECT_BACKOFF_INITIAL_S
+    next_reconnect_at_s = 0
+    return true
+  end
+
+  -- Encourage prompt collection of the abandoned client/socket object
+  -- before the next attempt, since the Modbus TCP API has no explicit
+  -- close() call.
+  collectgarbage("collect")
+  next_reconnect_at_s = now + reconnect_backoff_s
+  reconnect_backoff_s = math.min(reconnect_backoff_s * 2, RECONNECT_BACKOFF_MAX_S)
+  return false
+end
+
+local function pow10(value)
+  return 10 ^ value
+end
+
+local function to_i16(value)
+  if value >= 32768 then
+    return value - 65536
+  end
+  return value
+end
+
+local function scaled_u16(value, scale_factor)
+  if value == nil or scale_factor == nil or value == 65535 then
+    return nil
+  end
+  return value * pow10(scale_factor)
+end
+
+local function scaled_i16(value, scale_factor)
+  if value == nil or scale_factor == nil or value == 32768 then
+    return nil
+  end
+  return to_i16(value) * pow10(scale_factor)
+end
+
+local function u32_from_registers(msw, lsw)
+  if msw == nil or lsw == nil then
+    return nil
+  end
+  if msw == 65535 and lsw == 65535 then
+    return nil
+  end
+  return msw * 65536 + lsw
 end
 
 local function scan_sunspec_models(data)
@@ -227,41 +358,6 @@ local function scan_sunspec_models(data)
   end
 
   return models
-end
-
-local function pow10(value)
-  return 10 ^ value
-end
-
-local function to_i16(value)
-  if value >= 32768 then
-    return value - 65536
-  end
-  return value
-end
-
-local function scaled_u16(value, scale_factor)
-  if value == nil or scale_factor == nil or value == 65535 then
-    return nil
-  end
-  return value * pow10(scale_factor)
-end
-
-local function scaled_i16(value, scale_factor)
-  if value == nil or scale_factor == nil or value == 32768 then
-    return nil
-  end
-  return to_i16(value) * pow10(scale_factor)
-end
-
-local function u32_from_registers(msw, lsw)
-  if msw == nil or lsw == nil then
-    return nil
-  end
-  if msw == 65535 and lsw == 65535 then
-    return nil
-  end
-  return msw * 65536 + lsw
 end
 
 local function parse_model_103(data, payload_start, model_length)
@@ -358,7 +454,7 @@ local function send_error_telemetry(alert_name)
   })
 end
 
-local function send_telemetry()
+local function send_telemetry_impl()
   if not client or not layout then
     if not reconnect() or not layout then
       send_error_telemetry("communication_failed")
@@ -406,9 +502,46 @@ local function send_telemetry()
   enapter.send_telemetry(telemetry)
 end
 
+local function send_telemetry()
+  -- Final safety net: if anything above raises an unexpected Lua error
+  -- (e.g. unexpectedly malformed register data), catch it here instead of
+  -- letting it kill this scheduled job for good.
+  local ok, err = pcall(send_telemetry_impl)
+  if not ok then
+    local message = "send_telemetry exception: " .. tostring(err)
+    if message ~= last_error then
+      enapter.log(message, "error", true)
+      last_error = message
+    end
+    client = nil
+    backend = nil
+    layout = nil
+    send_error_telemetry("communication_failed")
+  end
+end
+
+-- Manual "Reconnect" command, exposed as a quick-access button in the
+-- Enapter app. There is no way for a Virtual UCM Lua script to power-cycle
+-- itself (no system.reboot() exists in the Lua API), so this instead does
+-- what a manual device reboot has actually been fixing: it drops the
+-- current connection, garbage-collects it, and immediately re-establishes
+-- it, bypassing the normal backoff timer.
+local function reconnect_command(ctx, args)
+  ctx.log("Manual reconnect requested from the Enapter app", "info")
+  local success = reconnect(true)
+  if success then
+    ctx.log("Reconnected successfully", "info")
+    return { status = "reconnected" }
+  end
+  ctx.error("Reconnect failed: " .. tostring(last_error))
+end
+
+enapter.register_command_handler("reconnect", reconnect_command)
+
 -- device/1.0 blueprints use top-level scheduler registration.
 scheduler.add(1000, reconnect)
 scheduler.add(5000, send_telemetry)
 scheduler.add(30000, send_properties)
 
 send_properties()
+
